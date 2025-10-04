@@ -50,7 +50,7 @@ docker-compose up airflow-init
 
 # 2. Démarrer l'ensemble des services en arrière-plan
 docker-compose up -d --force-recreate
-
+---
 Le flag `--force-recreate` garantit un redémarrage propre des services Airflow.
 
 ### 1.2 Accès à Airflow
