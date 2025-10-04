@@ -44,13 +44,13 @@ L'environnement est entièrement conteneurisé. Les services sont lancés via `d
 
 Dans le répertoire racine du projet (contenant le `docker-compose.yml`), exécutez les commandes suivantes :
 
-```bash
+ ```bash
 # 1. Initialiser la base de données Airflow
 docker-compose up airflow-init
 
 # 2. Démarrer l'ensemble des services en arrière-plan
 docker-compose up -d --force-recreate
----
+```
 Le flag `--force-recreate` garantit un redémarrage propre des services Airflow.
 
 ### 1.2 Accès à Airflow
