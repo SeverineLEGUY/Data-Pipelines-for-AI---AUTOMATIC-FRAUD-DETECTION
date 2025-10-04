@@ -2,18 +2,17 @@ import pandas as pd
 from sqlalchemy import create_engine
 import os
 import logging
-from datetime import datetime
+from datetime import datetime,timedelta
+
 
 logging.basicConfig(level=logging.INFO)
 
 def initiate_database_tables():
     """
-    Lit le fichier fraudTest.csv, insère toutes les transactions dans 'all_transactions'
-    et filtre les transactions frauduleuses pour les insérer dans 'fraud_predictions'.
+    Lit le fichier fraudTest.csv par lots (chunks), insère toutes les transactions 
+    dans 'all_transactions' et filtre les fraudes pour 'fraud_predictions'.
     """
     try:
-        # Configuration de la base de données depuis les variables d'environnement
-        # Remplacez cette ligne par la variable d'environnement réelle de votre docker-compose.yml
         db_uri = os.environ.get("PROD_DB_URI") 
         if not db_uri:
             logging.error("La variable d'environnement PROD_DB_URI n'est pas définie.")
@@ -24,29 +23,39 @@ def initiate_database_tables():
 
         file_path = "fraudTest.csv"
         
-        # Lecture du fichier CSV
-        df = pd.read_csv(file_path)
-        logging.info(f"✅ Fichier de données de test chargé, {len(df)} transactions trouvées.")
-        
-        # Ajout d'une colonne de timestamp pour être cohérent avec le service en temps réel
-        df['detection_timestamp'] = datetime.now()
+        # --- MODIFICATION CRUCIALE : Lecture par lots ---
+        CHUNK_SIZE = 50000  # Taille du lot. Ajustez si "Killed" réapparaît.
+        first_chunk = True
+        total_rows = 0
 
-        # Étape 1 : Sauvegarde de TOUTES les transactions dans la nouvelle table
-        logging.info("⏳ Sauvegarde de toutes les transactions dans la table 'all_transactions'...")
-        df.to_sql('all_transactions', engine, if_exists='replace', index=False)
-        logging.info("✅ Toutes les transactions ont été sauvegardées avec succès.")
-        
-        # Étape 2 : Filtrage des transactions frauduleuses pour la table 'fraud_predictions'
-        frauds_to_save = df[df['is_fraud'] == 1].copy()
-        
-        # Renommage de la colonne pour être cohérent avec le service de prédiction
-        frauds_to_save.rename(columns={'is_fraud': 'is_fraud_predicted'}, inplace=True)
-        
-        logging.info(f"✅ {len(frauds_to_save)} transactions frauduleuses identifiées.")
-        
-        # Sauvegarde dans la base de données, en utilisant le nouveau nom de table et le mode 'replace' pour l'initialisation
-        frauds_to_save.to_sql('fraud_predictions', engine, if_exists='replace', index=False)
-        logging.info("✅ Les transactions frauduleuses ont été sauvegardées avec succès.")
+        logging.info("⏳ Démarrage du chargement et de la sauvegarde des données par lots...")
+
+        # Utilisation de chunksize pour lire le fichier itérativement
+        for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE):
+            
+            # Prétraitement
+            yesterday_date = (datetime.now() - timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
+            chunk['detection_timestamp'] = yesterday_date
+            # chunk['detection_timestamp'] = datetime.now()
+            total_rows += len(chunk)
+
+            # Le mode 'replace' est utilisé uniquement pour le premier lot
+            # Tous les lots suivants utilisent 'append'
+            if_exists_mode = 'replace' if first_chunk else 'append'
+            
+            logging.info(f"⏳ Sauvegarde du lot de {len(chunk)} transactions. Mode: {if_exists_mode}...")
+            
+            # Étape 1 : Sauvegarde de TOUTES les transactions
+            chunk.to_sql('all_transactions', engine, if_exists=if_exists_mode, index=False)
+            
+            # Étape 2 : Filtrage et sauvegarde des transactions frauduleuses
+            frauds_to_save = chunk[chunk['is_fraud'] == 1].copy()
+            frauds_to_save.rename(columns={'is_fraud': 'is_fraud_predicted'}, inplace=True)
+            frauds_to_save.to_sql('fraud_predictions', engine, if_exists=if_exists_mode, index=False)
+            
+            first_chunk = False 
+
+        logging.info(f"✅ Toutes les données ont été chargées ({total_rows} lignes) et les tables initialisées avec succès.")
 
     except Exception as e:
         logging.error(f"❌ Erreur lors du chargement des données : {e}")
